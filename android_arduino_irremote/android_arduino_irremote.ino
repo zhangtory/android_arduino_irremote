@@ -16,9 +16,8 @@ int serverFlag = 0; //if wifi restart then make sure tcp server if working
 int RECV_PIN = 11; //recive btn pin
 int LED_PIN = 13; //flash led
 decode_results results; //ir results
-unsigned int rawCode[500];
+unsigned int rawCode[100];
 int bits;
-int lastButtonState; //recode btn status
 
 IRrecv irrecv(RECV_PIN);
 IRsend irsend;
@@ -68,13 +67,12 @@ void initTcpServer()
 //read command from wifi comdata
 void command()
 {
-  int custom = int(comdata[7]) - 48;
+  int custom = int(comdata[7]) - 48;//recode which client
   int len = int(comdata[9]) - 48;
   if (comdata[10] != ':') {
     len *= 10;
     len += (comdata[10] - 48);
   }
-
   if (comdata[10] == ':') {
     for (int i = 11; i < len + 11; i++) {
       data += comdata[i];
@@ -85,24 +83,67 @@ void command()
       data += comdata[i];
     }
   }
-  Serial.print("data: ");
-  Serial.println(data);
-  for (int i = 0; i < data.indexOf('&'); i++) {
-    op += data[i];
+  //  Serial.print("comdatalen: ");
+  //  Serial.println(comdata.length());
+  //  Serial.print("comdata: ");
+  //  Serial.println(comdata);
+  //  Serial.print("custom: ");
+  //  Serial.println(custom);
+  //  Serial.print("len: ");
+  //  Serial.println(len);
+
+  if (comdata.indexOf('e') + 1 == comdata.indexOf('n') && comdata.indexOf('n') + 1 == comdata.indexOf('d')) {
+    for (int i = 0; i < data.indexOf('&'); i++) {
+      op += data[i];
+    }
+    for (int i = data.indexOf('&') + 1 ; i < data.length() - 3 ; i++) {
+      irRaw += data[i];
+    }
+
+    Serial.print("op:");
+    Serial.println(op);
+    Serial.print("irRaw:");
+    Serial.println(irRaw);
+    Serial.print("data: ");
+    Serial.println(data);
+
+    if (op == "1") { // 1 == send
+      string2int();
+      sendCode();
+    }
+    Serial.print("bits");
+    Serial.println(bits);
+    data = "";
+    op = "";
+    irRaw = "";
+  } else {
+    comdata = "";
+    while (comdata == "") {
+      getComdata();
+    }
+    command();
   }
-  for (int i = data.indexOf('&') + 1 ; i < len ; i++) {
-    irRaw += data[i];
+}
+
+void string2int()
+{
+  //unsigned int  raw ;  string2int
+  int temp = 0;
+  bits = 0;
+  for (int i = 0; i < irRaw.length(); i++) {
+    if (irRaw[i] == ',') {
+      rawCode[bits++] = temp;
+      temp = 0;
+    } else {
+      temp *= 10;
+      temp += int(irRaw[i]) - 48;
+    }
   }
-  data = "";
-  Serial.print("op:");
-  Serial.println(op);
-  Serial.print("irRaw:");
-  Serial.println(irRaw);
-  op = "";
-  irRaw = "";
+  bits--;
 }
 
 //get rawCode
+//wait ir
 void getRawCode(decode_results *results) {
   digitalWrite(LED_PIN, HIGH);
   int count = results->rawlen - 1;
@@ -126,11 +167,11 @@ void getRawCode(decode_results *results) {
 
 //send commend
 void sendCode() {
-  irsend.sendRaw(rawCode, bits, 38);
+  irsend.sendRaw(rawCode, bits + 1, 38);
   Serial.print("sendRaw[");
-  Serial.print(bits);
+  Serial.print(++bits);
   Serial.print("]:{");
-  for (int i = 0; i < bits; i++) {
+  for (int i = 0; i <= bits; i++) {
     Serial.print(rawCode[i]);
     if (i != bits - 1) {
       Serial.print(",");
@@ -162,21 +203,20 @@ void loop() {
     serverFlag = 1;
   }
 
-  int buttonState = digitalRead(2);
-  if (lastButtonState == HIGH && buttonState == LOW) {
-    Serial.println("Released");
-    irrecv.enableIRIn(); // Re-enable receiver
+  //get data from wifi esp8266
+  getComdata();
+  if (comdata.indexOf('I') + 1 == comdata.indexOf('P') && comdata.indexOf('P') + 1 == comdata.indexOf('D')) {
+    //Serial.println(comdata);
+    command();
+    comdata = "";
   }
 
-  if (buttonState) {
-    Serial.println("btn");
-    delay(1000);
-  } else {
-    Serial.println("else");
-   // if (irrecv.decode(&results)) {
-   //   getRawCode(&results);
-   //   irrecv.resume(); // Receive the next value
-  //  }
+  if (comdata.length() > 0) {
+    Serial.print(comdata);
+    comdata = "";
   }
-  lastButtonState = buttonState;
+
+  if (Serial.available()) {
+    wifi.write(Serial.read());
+  }
 }
